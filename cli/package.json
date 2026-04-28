@@ -1,0 +1,26 @@
+{
+  "name": "mcpguard",
+  "version": "0.1.0",
+  "description": "MCPGuard CLI — Scan MCP servers for security vulnerabilities",
+  "bin": {
+    "mcpguard": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "keywords": ["mcp", "security", "scanner", "cli"],
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^5.4.1",
+    "cli-table3": "^0.6.5",
+    "commander": "^13.1.0",
+    "ora": "^8.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3"
+  }
+}
