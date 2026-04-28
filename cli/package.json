@@ -10,10 +10,15 @@
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js"
   },
-  "keywords": ["mcp", "security", "scanner", "cli"],
+  "keywords": [
+    "mcp",
+    "security",
+    "scanner",
+    "cli"
+  ],
   "license": "MIT",
   "dependencies": {
-    "chalk": "^5.4.1",
+    "chalk": "^4.1.2",
     "cli-table3": "^0.6.5",
     "commander": "^13.1.0",
     "ora": "^8.2.0"
