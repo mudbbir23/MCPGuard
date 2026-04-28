@@ -1,0 +1,88 @@
+name: 'MCPGuard Security Scanner'
+description: 'Automated security scanning for Model Context Protocol (MCP) servers'
+author: 'mudbbir23'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  target:
+    description: 'Target to scan (defaults to current repository URL)'
+    required: false
+    default: 'https://github.com/${{ github.repository }}'
+  api-url:
+    description: 'MCPGuard API URL'
+    required: false
+    default: 'https://mcpguard.com/api' # Replace with actual prod URL
+  fail-on-critical:
+    description: 'Fail the action if CRITICAL or HIGH vulnerabilities are found'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Run MCPGuard CLI
+      shell: bash
+      run: |
+        echo "::group::Installing MCPGuard CLI"
+        # In a real scenario, this would install from npm, e.g., npm install -g mcpguard
+        # Since it's a local action for now, we'll clone and build or use a pre-built binary
+        # For MVP demonstration, we curl the API directly to trigger the scan and wait
+        echo "::endgroup::"
+        
+        echo "::group::Running Security Scan"
+        TARGET="${{ inputs.target }}"
+        API_URL="${{ inputs.api-url }}"
+        FAIL_ON_CRIT="${{ inputs.fail-on-critical }}"
+        
+        echo "Scanning target: $TARGET"
+        echo "Using API: $API_URL"
+        
+        # Start scan
+        START_RES=$(curl -s -X POST "$API_URL/scans" \
+          -H "Content-Type: application/json" \
+          -d "{\"target_url\": \"$TARGET\", \"target_type\": \"github\"}")
+        
+        SCAN_ID=$(echo $START_RES | grep -oP '(?<="scan_id":")[^"]*')
+        
+        if [ -z "$SCAN_ID" ]; then
+          echo "::error::Failed to start scan. API Response: $START_RES"
+          exit 1
+        fi
+        
+        echo "Scan started successfully. ID: $SCAN_ID"
+        echo "Polling for results..."
+        
+        # Poll for completion
+        STATUS="pending"
+        while [[ "$STATUS" == "pending" || "$STATUS" == "running" ]]; do
+          sleep 5
+          POLL_RES=$(curl -s "$API_URL/scans/$SCAN_ID")
+          STATUS=$(echo $POLL_RES | grep -oP '(?<="status":")[^"]*')
+          PROGRESS=$(echo $POLL_RES | grep -oP '(?<="progress":")[^"]*' || echo "Scanning...")
+          echo "Status: $STATUS - $PROGRESS"
+        done
+        
+        if [ "$STATUS" == "failed" ]; then
+          ERROR_MSG=$(echo $POLL_RES | grep -oP '(?<="error_message":")[^"]*')
+          echo "::error::Scan failed: $ERROR_MSG"
+          exit 1
+        fi
+        
+        # Process results
+        SCORE=$(echo $POLL_RES | grep -oP '(?<="overall_score":")[^"]*')
+        echo "::notice::Scan complete! Overall Security Score: $SCORE"
+        
+        if [[ "$FAIL_ON_CRIT" == "true" && ("$SCORE" == "CRITICAL" || "$SCORE" == "HIGH") ]]; then
+          echo "::error::Critical or High vulnerabilities found! Check the full report at https://mcpguard.com/scan/$SCAN_ID"
+          exit 1
+        fi
+        
+        echo "::endgroup::"
