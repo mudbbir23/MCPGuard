@@ -172,7 +172,7 @@ class AdvisoryBase(BaseModel):
 
 
 class AdvisoryCreate(AdvisoryBase):
-    server_id: UUID
+    """Body for POST /registry/{server_id}/advisories — server_id comes from the path."""
 
 
 class Advisory(AdvisoryBase):

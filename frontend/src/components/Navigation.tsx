@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { SignInButton, SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
 
 export function Navigation() {
   return (
@@ -26,7 +27,21 @@ export function Navigation() {
           >
             Docs
           </Link>
-          <Button variant="secondary" size="sm" asChild>
+          
+          <div className="h-6 w-px bg-white/10 mx-2" />
+
+          <SignedOut>
+            <SignInButton mode="modal">
+              <Button variant="secondary" size="sm">
+                Sign In
+              </Button>
+            </SignInButton>
+          </SignedOut>
+          <SignedIn>
+            <UserButton appearance={{ elements: { userButtonAvatarBox: "w-8 h-8" } }} />
+          </SignedIn>
+
+          <Button variant="outline" size="sm" asChild className="ml-2 border-white/10 bg-white/5 hover:bg-white/10">
             <Link href="https://github.com/mudbbir23/MCPGuard" target="_blank">
               GitHub
             </Link>

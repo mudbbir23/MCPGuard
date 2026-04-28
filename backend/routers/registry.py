@@ -2,6 +2,7 @@
 MCPGuard — Registry Router
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 API endpoints for the MCP Security Registry: browse, submit, and manage servers.
+Uses Supabase PostgreSQL backend.
 """
 
 from __future__ import annotations
@@ -26,15 +27,9 @@ from backend.database.models import (
     SeverityScore,
 )
 from backend.dependencies import get_current_user, optional_user
+from backend.database.client import get_supabase
 
 router = APIRouter()
-
-# ─── In-memory store (replace with Supabase in production) ───
-
-_registry_store: dict[str, dict] = {}
-_advisory_store: dict[str, dict] = {}
-_watchlist_store: dict[str, list[str]] = {}  # user_id -> [server_id]
-
 
 # ─── GET /registry — List registry servers ───────────────────
 
@@ -52,37 +47,44 @@ async def list_registry_servers(
     sort: str = Query("updated_at", regex="^(updated_at|latest_score|name)$"),
 ):
     """
-    List registry servers with filtering, search, and pagination.
+    List registry servers with filtering, search, and pagination via Supabase.
     """
-    servers = list(_registry_store.values())
+    try:
+        supabase = get_supabase()
+    except ValueError:
+        # Fallback empty list if Supabase is not configured
+        return RegistryServerList(servers=[], total=0, page=page, limit=limit)
 
-    # Apply filters
+    query = supabase.table("registry_servers").select("*", count="exact")
+
     if category:
-        servers = [s for s in servers if s.get("category") == category]
+        query = query.eq("category", category)
     if language:
-        servers = [s for s in servers if s.get("language", "").lower() == language.lower()]
+        query = query.eq("language", language.lower())
     if search:
-        q = search.lower()
-        servers = [
-            s for s in servers
-            if q in s.get("name", "").lower() or q in s.get("description", "").lower()
-        ]
-
+        # Supabase ilike search
+        query = query.or_(f"name.ilike.%{search}%,description.ilike.%{search}%")
+    
     # Sort
     if sort == "name":
-        servers.sort(key=lambda s: s.get("name", ""))
+        query = query.order("name", desc=False)
     elif sort == "latest_score":
-        score_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "SAFE": 4, None: 5}
-        servers.sort(key=lambda s: score_order.get(s.get("latest_score"), 5))
+        # Note: ordering by ENUM in Supabase respects the ENUM defined order if created correctly, 
+        # or we just order by latest_score as text.
+        query = query.order("latest_score", desc=False)
     else:
-        servers.sort(key=lambda s: s.get("updated_at", ""), reverse=True)
+        query = query.order("updated_at", desc=True)
 
-    total = len(servers)
     start = (page - 1) * limit
-    page_servers = servers[start:start + limit]
+    end = start + limit - 1
+    
+    response = query.range(start, end).execute()
+    
+    servers = [RegistryServer(**row) for row in response.data]
+    total = response.count if response.count else 0
 
     return RegistryServerList(
-        servers=[RegistryServer(**s) for s in page_servers],
+        servers=servers,
         total=total,
         page=page,
         limit=limit,
@@ -98,13 +100,18 @@ async def list_registry_servers(
 )
 async def get_registry_server(server_id: str):
     """Get detailed information about a specific registry server."""
-    server = _registry_store.get(server_id)
-    if not server:
+    try:
+        supabase = get_supabase()
+    except ValueError:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    response = supabase.table("registry_servers").select("*").eq("id", server_id).execute()
+    if not response.data:
         raise HTTPException(
             status_code=404,
             detail={"error": {"code": "not_found", "message": f"Server {server_id} not found."}},
         )
-    return RegistryServer(**server)
+    return RegistryServer(**response.data[0])
 
 
 # ─── POST /registry/submit — Submit a server ────────────────
@@ -130,18 +137,21 @@ async def submit_server(
             detail={"error": {"code": "invalid_url", "message": "Invalid GitHub URL format."}},
         )
 
+    try:
+        supabase = get_supabase()
+    except ValueError:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
     # Check for duplicates
-    for s in _registry_store.values():
-        if s.get("github_url") == body.github_url:
-            raise HTTPException(
-                status_code=409,
-                detail={"error": {"code": "duplicate", "message": "This server is already in the registry."}},
-            )
+    dup_res = supabase.table("registry_servers").select("id").eq("github_url", body.github_url).execute()
+    if dup_res.data:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": {"code": "duplicate", "message": "This server is already in the registry."}},
+        )
 
     server_id = str(uuid4())
-    now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
-
-    # Extract name from GitHub URL
+    
     parts = body.github_url.rstrip("/").split("/")
     name = parts[-1] if parts else "unknown"
 
@@ -153,22 +163,37 @@ async def submit_server(
         "npm_package": body.npm_package,
         "language": "unknown",
         "category": body.category.value,
-        "latest_score": None,
-        "latest_scan_id": None,
-        "scan_count": 0,
-        "created_at": now,
-        "updated_at": now,
     }
 
-    _registry_store[server_id] = server_record
+    # Insert into registry_servers
+    supabase.table("registry_servers").insert(server_record).execute()
 
-    # Queue scan
+    # Create scan record in DB
     scan_id = str(uuid4())
+    user_id = user.get("id") if user else None
+    
+    scan_record = {
+        "id": scan_id,
+        "target_url": body.github_url,
+        "target_type": "github",
+        "status": "pending",
+        "user_id": user_id
+    }
+    
+    # We ignore errors if user_id UUID parsing fails since we just use Supabase auth
+    try:
+        supabase.table("scans").insert(scan_record).execute()
+    except Exception as e:
+        # If user_id is not a valid UUID in our DB, insert without user_id
+        scan_record["user_id"] = None
+        supabase.table("scans").insert(scan_record).execute()
+
+    # Queue scan in celery
     try:
         from backend.tasks.scan_tasks import run_scan
         run_scan.delay(scan_id)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Error queueing scan: {e}")
 
     return ScanStartResponse(
         scan_id=scan_id,
@@ -182,14 +207,18 @@ async def submit_server(
 @router.get("/{server_id}/advisories")
 async def get_server_advisories(server_id: str):
     """List all advisories for a specific server."""
-    if server_id not in _registry_store:
+    try:
+        supabase = get_supabase()
+    except ValueError:
+        return {"advisories": [], "total": 0}
+
+    # Verify server exists
+    srv = supabase.table("registry_servers").select("id").eq("id", server_id).execute()
+    if not srv.data:
         raise HTTPException(status_code=404, detail={"error": {"code": "not_found", "message": "Server not found."}})
 
-    advisories = [
-        a for a in _advisory_store.values()
-        if a.get("server_id") == server_id
-    ]
-    return {"advisories": advisories, "total": len(advisories)}
+    res = supabase.table("registry_advisories").select("*").eq("server_id", server_id).execute()
+    return {"advisories": res.data, "total": len(res.data)}
 
 
 # ─── POST /registry/{server_id}/advisories ──────────────────
@@ -197,11 +226,16 @@ async def get_server_advisories(server_id: str):
 @router.post("/{server_id}/advisories", status_code=status.HTTP_201_CREATED)
 async def create_advisory(server_id: str, body: AdvisoryCreate):
     """Submit a security advisory for a registry server."""
-    if server_id not in _registry_store:
+    try:
+        supabase = get_supabase()
+    except ValueError:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    srv = supabase.table("registry_servers").select("id").eq("id", server_id).execute()
+    if not srv.data:
         raise HTTPException(status_code=404, detail={"error": {"code": "not_found", "message": "Server not found."}})
 
     advisory_id = str(uuid4())
-    now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
 
     advisory = {
         "id": advisory_id,
@@ -210,14 +244,12 @@ async def create_advisory(server_id: str, body: AdvisoryCreate):
         "title": body.title,
         "description": body.description,
         "severity": body.severity.value,
-        "disclosed_at": now,
         "reporter_email": body.reporter_email,
         "verified": False,
-        "created_at": now,
     }
 
-    _advisory_store[advisory_id] = advisory
-    return advisory
+    res = supabase.table("registry_advisories").insert(advisory).execute()
+    return res.data[0]
 
 
 # ─── POST /registry/{server_id}/watch ───────────────────────
@@ -225,15 +257,21 @@ async def create_advisory(server_id: str, body: AdvisoryCreate):
 @router.post("/{server_id}/watch", status_code=status.HTTP_201_CREATED)
 async def watch_server(server_id: str, user: dict = Depends(get_current_user)):
     """Add a server to the user's watchlist."""
-    if server_id not in _registry_store:
+    try:
+        supabase = get_supabase()
+    except ValueError:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    srv = supabase.table("registry_servers").select("id").eq("id", server_id).execute()
+    if not srv.data:
         raise HTTPException(status_code=404, detail={"error": {"code": "not_found", "message": "Server not found."}})
 
-    user_id = user.get("id", "anonymous")
-    if user_id not in _watchlist_store:
-        _watchlist_store[user_id] = []
-
-    if server_id not in _watchlist_store[user_id]:
-        _watchlist_store[user_id].append(server_id)
+    user_id = user.get("id")
+    try:
+        supabase.table("watchlist").insert({"user_id": user_id, "server_id": server_id}).execute()
+    except Exception:
+        # Ignore if already exists (primary key constraint)
+        pass
 
     return {"status": "watching", "server_id": server_id}
 
@@ -243,9 +281,10 @@ async def watch_server(server_id: str, user: dict = Depends(get_current_user)):
 @router.delete("/{server_id}/watch")
 async def unwatch_server(server_id: str, user: dict = Depends(get_current_user)):
     """Remove a server from the user's watchlist."""
-    user_id = user.get("id", "anonymous")
-    if user_id in _watchlist_store:
-        _watchlist_store[user_id] = [
-            s for s in _watchlist_store[user_id] if s != server_id
-        ]
+    try:
+        supabase = get_supabase()
+        supabase.table("watchlist").delete().eq("user_id", user.get("id")).eq("server_id", server_id).execute()
+    except Exception:
+        pass
+        
     return {"status": "unwatched", "server_id": server_id}

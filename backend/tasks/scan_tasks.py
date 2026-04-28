@@ -36,17 +36,26 @@ celery_app.conf.update(
 )
 
 
-# ─── In-memory scan store reference ─────────────────────────
-# In production, these would update Supabase directly
+import redis
+redis_client = redis.Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), decode_responses=True)
 
 def _update_scan(scan_id: str, **kwargs):
-    """Update scan record in store."""
+    """Update scan record in Supabase and progress in Redis."""
     try:
-        from backend.routers.scans import _scans_store
-        if scan_id in _scans_store:
-            _scans_store[scan_id].update(kwargs)
-    except ImportError:
-        pass
+        from backend.database.client import get_supabase
+        supabase = get_supabase()
+        
+        db_kwargs = {k: v for k, v in kwargs.items() if k != "progress"}
+        if db_kwargs:
+            supabase.table("scans").update(db_kwargs).eq("id", scan_id).execute()
+            
+        if "progress" in kwargs:
+            if kwargs["progress"]:
+                redis_client.setex(f"scan_progress:{scan_id}", 3600, kwargs["progress"])
+            else:
+                redis_client.delete(f"scan_progress:{scan_id}")
+    except Exception as e:
+        print(f"Error updating scan {scan_id}: {e}")
 
 
 # ─── Main Scan Task ──────────────────────────────────────────
@@ -71,11 +80,13 @@ def run_scan(self, scan_id: str):
     tmp_dir = None
 
     try:
-        # Get scan info
         try:
-            from backend.routers.scans import _scans_store
-            scan = _scans_store.get(scan_id)
-        except ImportError:
+            from backend.database.client import get_supabase
+            supabase = get_supabase()
+            response = supabase.table("scans").select("*").eq("id", scan_id).execute()
+            scan = response.data[0] if response.data else None
+        except Exception as e:
+            print(f"Error fetching scan {scan_id}: {e}")
             scan = None
 
         if not scan:
