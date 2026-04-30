@@ -93,28 +93,37 @@ To stop the servers, press `Ctrl + C` in the terminal, or run `docker-compose do
 
 ---
 
-## 🚀 How to Deploy to Production
+## 🚀 How to Deploy to Production (Free Tier)
 
-When you are ready to put this on the live internet, we recommend a split deployment strategy (Vercel for Frontend, Render/Railway for Backend).
+When you are ready to put this on the live internet, we recommend a split deployment strategy optimized for free tiers: **Vercel** for the Frontend, **Render** for the Backend, and **Upstash** for Redis.
 
-### 1. Deploy the Backend (FastAPI + Celery)
-Standard serverless platforms (like Vercel) don't support long-running background tasks. You should use a platform like [Render](https://render.com/) or [Railway](https://railway.app/).
+### 1. Setup Redis (Upstash)
+Celery background workers require a message broker.
+1. Create a free Redis database at [Upstash](https://upstash.com/).
+2. Copy the connection string (it will look like `rediss://default:PASSWORD@ENDPOINT.upstash.io:6379`).
 
-1. Connect your GitHub repository.
-2. Create a **Web Service** pointing to the `backend` directory.
-   - Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-3. Create a **Background Worker** pointing to the `backend` directory.
-   - Start command: `celery -A tasks.scan_tasks worker --loglevel=info`
-4. Create a **Redis instance** (both platforms offer simple Redis plugins/services).
-5. Add all your backend environment variables (`DATABASE_URL`, `CELERY_BROKER_URL` pointing to your Redis instance, `ANTHROPIC_API_KEY`, etc.).
+### 2. Deploy the Backend (Render)
+To keep things free, we bundle both the FastAPI server and the Celery worker into a single Docker container.
+1. Sign up for [Render.com](https://render.com/) and create a new **Web Service**.
+2. Connect your GitHub repository.
+3. Leave the **Root Directory** completely blank.
+4. Set the **Dockerfile Path** to `backend/Dockerfile`.
+5. Add your Environment Variables:
+   - `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (From your Supabase dashboard)
+   - `REDIS_URL`, `CELERY_BROKER_URL`, and `CELERY_RESULT_BACKEND` (Set all three to your Upstash URL)
+   - `ANTHROPIC_API_KEY` (Optional)
+   - `BACKEND_CORS_ORIGINS` (Set to `*` to allow preview links, or explicitly to your Vercel URL)
+6. Click **Deploy**. Render will run both the API and the background scanner together!
 
-### 2. Deploy the Frontend (Next.js)
+### 3. Deploy the Frontend (Vercel)
 1. Go to [Vercel](https://vercel.com/) and import your GitHub repository.
 2. Set the **Root Directory** to `frontend`.
 3. Add your frontend environment variables:
-   - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
-   - `NEXT_PUBLIC_API_URL` (Set this to the URL of the Backend Web Service you just deployed above, e.g., `https://mcpguard-api.onrender.com`).
+   - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`
+   - `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `NEXT_PUBLIC_API_URL` (Set this to the live URL Render just gave you, e.g., `https://mcpguard-backend.onrender.com`)
 4. Click **Deploy**.
+5. *Note: If you visit Vercel Preview URLs on mobile, Vercel Protection may prompt you to log in to your Vercel account. This does not happen on your main production URL.*
 
 ---
 
