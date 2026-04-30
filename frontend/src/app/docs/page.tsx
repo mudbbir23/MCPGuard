@@ -1,4 +1,4 @@
-import { ShieldAlert, Terminal, Github, Code } from "lucide-react";
+import { ShieldAlert, Terminal, GitBranch, Code } from "lucide-react";
 
 export default function DocsPage() {
   return (
@@ -58,7 +58,7 @@ export default function DocsPage() {
         {/* Section 3 */}
         <section>
           <h2 className="text-2xl font-semibold border-b border-white/10 pb-2 mb-6 flex items-center gap-2">
-            <Github className="w-6 h-6 text-blue-400" />
+            <GitBranch className="w-6 h-6 text-blue-400" />
             GitHub Action Integration
           </h2>
           <p className="text-white/70 mb-4">
