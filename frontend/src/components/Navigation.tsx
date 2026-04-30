@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { Shield } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { SignInButton, UserButton } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
+import { cn } from "@/lib/utils";
 
 export async function Navigation() {
   const { userId } = await auth();
@@ -43,11 +44,9 @@ export async function Navigation() {
             <UserButton appearance={{ elements: { userButtonAvatarBox: "w-8 h-8" } }} />
           )}
 
-          <Button variant="outline" size="sm" asChild className="ml-2 border-white/10 bg-white/5 hover:bg-white/10">
-            <Link href="https://github.com/mudbbir23/MCPGuard" target="_blank">
-              GitHub
-            </Link>
-          </Button>
+          <Link href="https://github.com/mudbbir23/MCPGuard" target="_blank" className={cn(buttonVariants({ variant: "outline", size: "sm" }), "ml-2 border-white/10 bg-white/5 hover:bg-white/10")}>
+            GitHub
+          </Link>
         </nav>
       </div>
     </header>
