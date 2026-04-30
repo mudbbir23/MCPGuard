@@ -15,4 +15,4 @@ COPY scanner/ /app/scanner/
 
 ENV PYTHONPATH=/app
 
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD celery -A backend.tasks.scan_tasks worker --loglevel=info & uvicorn backend.main:app --host 0.0.0.0 --port 8000
