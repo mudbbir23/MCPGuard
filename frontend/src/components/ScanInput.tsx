@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Search, Github, Package, ArrowRight, Loader2 } from "lucide-react";
+import { Search, GitBranch, Package, ArrowRight, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -85,7 +85,7 @@ export function ScanInput({ onScanStarted }: ScanInputProps) {
             >
               {detectedType === "github" ? (
                 <>
-                  <Github className="w-3 h-3 mr-1" /> GitHub repo detected
+                  <GitBranch className="w-3 h-3 mr-1" /> GitHub repo detected
                 </>
               ) : (
                 <>
