@@ -68,7 +68,7 @@ export function RegistryTable({ servers, onSearch, onCategoryFilter, onSort }: R
         </form>
         
         <div className="flex items-center gap-2 w-full sm:w-auto">
-          <Select onValueChange={onCategoryFilter} defaultValue="all">
+          <Select onValueChange={(v) => v && onCategoryFilter(v)} defaultValue="all">
             <SelectTrigger className="w-[150px] bg-[#111] border-white/10">
               <SelectValue placeholder="Category" />
             </SelectTrigger>
@@ -82,7 +82,7 @@ export function RegistryTable({ servers, onSearch, onCategoryFilter, onSort }: R
             </SelectContent>
           </Select>
 
-          <Select onValueChange={onSort} defaultValue="updated_at">
+          <Select onValueChange={(v) => v && onSort(v)} defaultValue="updated_at">
             <SelectTrigger className="w-[150px] bg-[#111] border-white/10">
               <SelectValue placeholder="Sort by" />
             </SelectTrigger>
